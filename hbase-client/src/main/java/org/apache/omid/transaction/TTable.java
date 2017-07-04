@@ -132,7 +132,7 @@ public class TTable implements Closeable {
 
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
-        final long readTimestamp = transaction.getStartTimestamp();
+        final long readTimestamp = transaction.getReadTimestamp();
         final Get tsget = new Get(get.getRow()).setFilter(get.getFilter());
         TimeRange timeRange = get.getTimeRange();
         long startTime = timeRange.getMin();
@@ -177,10 +177,10 @@ public class TTable implements Closeable {
 
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
-        final long startTimestamp = transaction.getStartTimestamp();
+        final long writeTimestamp = transaction.getWriteTimestamp();
         boolean issueGet = false;
 
-        final Put deleteP = new Put(delete.getRow(), startTimestamp);
+        final Put deleteP = new Put(delete.getRow(), writeTimestamp);
         final Get deleteG = new Get(delete.getRow());
         Map<byte[], List<Cell>> fmap = delete.getFamilyCellMap();
         if (fmap.isEmpty()) {
@@ -188,12 +188,12 @@ public class TTable implements Closeable {
         }
         for (List<Cell> cells : fmap.values()) {
             for (Cell cell : cells) {
-                CellUtils.validateCell(cell, startTimestamp);
+                CellUtils.validateCell(cell, writeTimestamp);
                 switch (KeyValue.Type.codeToType(cell.getTypeByte())) {
                     case DeleteColumn:
                         deleteP.add(CellUtil.cloneFamily(cell),
                                     CellUtil.cloneQualifier(cell),
-                                    startTimestamp,
+                                    writeTimestamp,
                                     CellUtils.DELETE_TOMBSTONE);
                         transaction.addWriteSetElement(
                             new HBaseCellId(table,
@@ -210,14 +210,15 @@ public class TTable implements Closeable {
                         if (cell.getTimestamp() == HConstants.LATEST_TIMESTAMP) {
                             deleteP.add(CellUtil.cloneFamily(cell),
                                         CellUtil.cloneQualifier(cell),
-                                        startTimestamp,
+                                        writeTimestamp,
                                         CellUtils.DELETE_TOMBSTONE);
                             transaction.addWriteSetElement(
                                 new HBaseCellId(table,
                                                 delete.getRow(),
                                                 CellUtil.cloneFamily(cell),
                                                 CellUtil.cloneQualifier(cell),
-                                                cell.getTimestamp()));
+                                                writeTimestamp));
+                                                //cell.getTimestamp()));
                             break;
                         } else {
                             throw new UnsupportedOperationException(
@@ -240,7 +241,8 @@ public class TTable implements Closeable {
                         byte[] qualifier = entryQ.getKey();
                         deleteP.add(family, qualifier, CellUtils.DELETE_TOMBSTONE);
                         transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, qualifier,
-                                                                       transaction.getStartTimestamp()));
+                                transaction.getStartTimestamp()));
+//                                writeTimestamp));
                     }
                 }
             }
@@ -265,18 +267,18 @@ public class TTable implements Closeable {
 
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
-        final long startTimestamp = transaction.getStartTimestamp();
+        final long writeTimestamp = transaction.getWriteTimestamp();
         // create put with correct ts
-        final Put tsput = new Put(put.getRow(), startTimestamp);
+        final Put tsput = new Put(put.getRow(), writeTimestamp);
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
         for (List<Cell> kvl : kvs.values()) {
             for (Cell c : kvl) {
-                CellUtils.validateCell(c, startTimestamp);
+                CellUtils.validateCell(c, writeTimestamp);
                 // Reach into keyvalue to update timestamp.
                 // It's not nice to reach into keyvalue internals,
                 // but we want to avoid having to copy the whole thing
                 KeyValue kv = KeyValueUtil.ensureKeyValue(c);
-                Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), startTimestamp);
+                Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), writeTimestamp);
                 tsput.add(kv);
 
                 transaction.addWriteSetElement(
@@ -307,7 +309,7 @@ public class TTable implements Closeable {
 
         Scan tsscan = new Scan(scan);
         tsscan.setMaxVersions(1);
-        tsscan.setTimeRange(0, transaction.getStartTimestamp() + 1);
+        tsscan.setTimeRange(0, transaction.getReadTimestamp() + 1);
         Map<byte[], NavigableSet<byte[]>> kvs = scan.getFamilyMap();
         for (Map.Entry<byte[], NavigableSet<byte[]>> entry : kvs.entrySet()) {
             byte[] family = entry.getKey();
@@ -351,7 +353,7 @@ public class TTable implements Closeable {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
-                if (isCellInSnapshot(cell, transaction, commitCache)) {
+                if (isCellInTransaction(cell, transaction, commitCache) || isCellInSnapshot(cell, transaction, commitCache)) {
                     if (!CellUtil.matchingValue(cell, CellUtils.DELETE_TOMBSTONE)) {
                         keyValuesInSnapshot.add(cell);
                     }
@@ -396,14 +398,22 @@ public class TTable implements Closeable {
         return commitCache;
     }
 
+    private boolean isCellInTransaction(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache) {
+
+        long startTimestamp = transaction.getStartTimestamp();
+        long readTimestamp = transaction.getReadTimestamp();
+
+        if (kv.getTimestamp() >= startTimestamp && kv.getTimestamp() <= readTimestamp) {
+            return true;
+        }
+
+        return false;
+    }
+
     private boolean isCellInSnapshot(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache)
         throws IOException {
 
         long startTimestamp = transaction.getStartTimestamp();
-
-        if (kv.getTimestamp() == startTimestamp) {
-            return true;
-        }
 
         Optional<Long> commitTimestamp =
             tryToLocateCellCommitTimestamp(transaction.getTransactionManager(), transaction.getEpoch(), kv,

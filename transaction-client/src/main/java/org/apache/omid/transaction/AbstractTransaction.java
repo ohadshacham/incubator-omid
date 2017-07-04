@@ -37,14 +37,23 @@ import java.util.Set;
  */
 public abstract class AbstractTransaction<T extends CellId> implements Transaction {
 
+    enum VisibilityLevel {
+        SNAPSHOT, SNAPSHOT_ALL, SNAPSHOT_EXCLUDE_CURRENT
+    }
+
+    public static final int NUM_CHECKPOINTS = 50;
+
     private transient Map<String, Object> metadata = new HashMap<>();
     private final AbstractTransactionManager transactionManager;
     private final long startTimestamp;
+    private long readTimestamp;
+    private long writeTimestamp;
     private final long epoch;
     private long commitTimestamp;
     private boolean isRollbackOnly;
     private final Set<T> writeSet;
     private Status status = Status.RUNNING;
+    private VisibilityLevel visibilityLevel;
 
     /**
      * Base constructor
@@ -66,10 +75,11 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
                                long epoch,
                                Set<T> writeSet,
                                AbstractTransactionManager transactionManager) {
-        this.startTimestamp = transactionId;
+        this.startTimestamp = this.readTimestamp = this.writeTimestamp = transactionId;
         this.epoch = epoch;
         this.writeSet = writeSet;
         this.transactionManager = transactionManager;
+        visibilityLevel = VisibilityLevel.SNAPSHOT;
     }
 
     /**
@@ -134,11 +144,35 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
     }
 
     /**
+     * Returns the read timestamp for this transaction.
+     * @return read timestamp
+     */
+    public long getReadTimestamp() {
+        return readTimestamp;
+    }
+
+    /**
+     * Returns the write timestamp for this transaction.
+     * @return write timestamp
+     */
+    public long getWriteTimestamp() {
+        return writeTimestamp;
+    }
+
+    /**
      * Returns the commit timestamp for this transaction.
      * @return commit timestamp
      */
     public long getCommitTimestamp() {
         return commitTimestamp;
+    }
+
+    /**
+     * Returns the visibility level for this transaction.
+     * @return visibility level
+     */
+    public VisibilityLevel getVisibilityLevel() {
+        return visibilityLevel;
     }
 
     /**
@@ -148,6 +182,20 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      */
     public void setCommitTimestamp(long commitTimestamp) {
         this.commitTimestamp = commitTimestamp;
+    }
+
+    /**
+     * Sets the visibility level for this transaction.
+     * @param visibilityLevel
+     *            the {@link VisibilityLevel} to set
+     */
+    public void setVisibilityLevel(VisibilityLevel visibilityLevel) {
+        this.visibilityLevel = visibilityLevel;
+
+        if (this.visibilityLevel == VisibilityLevel.SNAPSHOT ||
+            this.visibilityLevel == VisibilityLevel.SNAPSHOT_ALL) {
+            this.readTimestamp = this.writeTimestamp;
+        }
     }
 
     /**
@@ -174,6 +222,16 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      */
     public void addWriteSetElement(T element) {
         writeSet.add(element);
+    }
+
+    /**
+     * Creates a checkpoint and sets the visibility level to SNAPSHOT_EXCLUDE_CURRENT
+     * The number of checkpoints is bounded to NUM_CHECKPOINTS in order to make checkpoint a client side operation
+     * @return true if a checkpoint was created and false otherwise
+     */
+    boolean checkpoint() {
+        setVisibilityLevel(VisibilityLevel.SNAPSHOT_EXCLUDE_CURRENT);
+        return (++this.writeTimestamp % NUM_CHECKPOINTS == 0);
     }
 
     @Override
