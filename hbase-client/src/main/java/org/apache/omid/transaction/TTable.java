@@ -149,6 +149,8 @@ public class TTable implements Closeable {
                     tsget.addColumn(family, qualifier);
                     tsget.addColumn(family, CellUtils.addShadowCellSuffix(qualifier));
                 }
+                tsget.addColumn(family, CellUtils.FAMILY_DELETE_QUALIFIER);
+                tsget.addColumn(family, CellUtils.addShadowCellSuffix(CellUtils.FAMILY_DELETE_QUALIFIER));
             }
         }
         LOG.trace("Initial Get = {}", tsget);
@@ -238,10 +240,13 @@ public class TTable implements Closeable {
                     byte[] family = entryF.getKey();
                     for (Entry<byte[], NavigableMap<Long, byte[]>> entryQ : entryF.getValue().entrySet()) {
                         byte[] qualifier = entryQ.getKey();
-                        deleteP.add(family, qualifier, CellUtils.DELETE_TOMBSTONE);
                         transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, qualifier,
                                                                        transaction.getStartTimestamp()));
                     }
+                    deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, transaction.getStartTimestamp(),
+                            HConstants.EMPTY_BYTE_ARRAY);
+                    transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, CellUtils.FAMILY_DELETE_QUALIFIER,
+                            transaction.getStartTimestamp()));
                 }
             }
         }
@@ -318,6 +323,9 @@ public class TTable implements Closeable {
             for (byte[] qualifier : qualifiers) {
                 tsscan.addColumn(family, CellUtils.addShadowCellSuffix(qualifier));
             }
+            if (!qualifiers.isEmpty()) {
+                scan.addColumn(entry.getKey(), CellUtils.FAMILY_DELETE_QUALIFIER);
+            }
         }
         return new TransactionalClientScanner(transaction, tsscan, 1);
     }
@@ -346,11 +354,28 @@ public class TTable implements Closeable {
         }
 
         Map<Long, Long> commitCache = buildCommitCache(rawCells);
+        Map<byte[], List<Cell>> familyDeletionCache = buildFamilyDeletionCache(rawCells);
 
-        for (Collection<Cell> columnCells : groupCellsByColumnFilteringShadowCells(rawCells)) {
+        for (Collection<Cell> columnCells : groupCellsByColumnFilteringShadowCellsAndFamilyDeletion(rawCells)) {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
+
+                List<Cell> familyDeletionCells = familyDeletionCache.get(cell.getFamily());
+                if (familyDeletionCells != null) {
+                    for(Cell familyDeletionCell : familyDeletionCells) {
+                        Optional<Long> familyDeletionCommitTimestamp = getCommitTimestamp(familyDeletionCell, transaction, commitCache);
+                        if (familyDeletionCommitTimestamp.isPresent() && familyDeletionCommitTimestamp.get() > cell.getTimestamp()) {
+                            snapshotValueFound = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (snapshotValueFound == true) {
+                    break;
+                }
+
                 if (isCellInSnapshot(cell, transaction, commitCache)) {
                     if (!CellUtil.matchingValue(cell, CellUtils.DELETE_TOMBSTONE)) {
                         keyValuesInSnapshot.add(cell);
@@ -396,20 +421,50 @@ public class TTable implements Closeable {
         return commitCache;
     }
 
+    private Map<byte[], List<Cell>> buildFamilyDeletionCache(List<Cell> rawCells) {
+
+        Map<byte[], List<Cell>> familyDeletionCache = new HashMap<>();
+
+        for (Cell cell : rawCells) {
+            if (CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER) &&
+                    CellUtil.matchingValue(cell, HConstants.EMPTY_BYTE_ARRAY)) {
+
+                List<Cell> cells = familyDeletionCache.get(cell.getFamily());
+                if (cells == null) {
+                    cells = new ArrayList<>();
+                    familyDeletionCache.put(CellUtil.cloneFamily(cell), cells);
+                }
+
+                cells.add(cell);
+            }
+        }
+
+        return familyDeletionCache;
+    }
+
+    private Optional<Long> getCommitTimestamp(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache)
+            throws IOException {
+
+            long startTimestamp = transaction.getStartTimestamp();
+
+            if (kv.getTimestamp() == startTimestamp) {
+                return Optional.of(startTimestamp);
+            }
+
+            Optional<Long> commitTimestamp =
+                tryToLocateCellCommitTimestamp(transaction.getTransactionManager(), transaction.getEpoch(), kv,
+                                               commitCache);
+
+            return commitTimestamp;
+    }
+
     private boolean isCellInSnapshot(Cell kv, HBaseTransaction transaction, Map<Long, Long> commitCache)
         throws IOException {
 
-        long startTimestamp = transaction.getStartTimestamp();
+        Optional<Long> commitTimestamp = getCommitTimestamp(kv, transaction, commitCache);
 
-        if (kv.getTimestamp() == startTimestamp) {
-            return true;
-        }
 
-        Optional<Long> commitTimestamp =
-            tryToLocateCellCommitTimestamp(transaction.getTransactionManager(), transaction.getEpoch(), kv,
-                                           commitCache);
-
-        return commitTimestamp.isPresent() && commitTimestamp.get() < startTimestamp;
+        return commitTimestamp.isPresent() && commitTimestamp.get() < transaction.getStartTimestamp();
     }
 
     private Get createPendingGet(Cell cell, int versionCount) throws IOException {
@@ -794,13 +849,13 @@ public class TTable implements Closeable {
         }
     }
 
-    static ImmutableList<Collection<Cell>> groupCellsByColumnFilteringShadowCells(List<Cell> rawCells) {
+    static ImmutableList<Collection<Cell>> groupCellsByColumnFilteringShadowCellsAndFamilyDeletion(List<Cell> rawCells) {
 
-        Predicate<Cell> shadowCellFilter = new Predicate<Cell>() {
+        Predicate<Cell> shadowCellAndFamilyDeletionFilter = new Predicate<Cell>() {
 
             @Override
             public boolean apply(Cell cell) {
-                return cell != null && !CellUtils.isShadowCell(cell);
+                return cell != null && !CellUtils.isShadowCell(cell) && !CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER);
             }
 
         };
@@ -814,7 +869,7 @@ public class TTable implements Closeable {
 
         };
 
-        return Multimaps.index(Iterables.filter(rawCells, shadowCellFilter), cellToColumnWrapper)
+        return Multimaps.index(Iterables.filter(rawCells, shadowCellAndFamilyDeletionFilter), cellToColumnWrapper)
             .asMap().values()
             .asList();
     }
