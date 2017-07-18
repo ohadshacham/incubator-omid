@@ -231,15 +231,19 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      */
     boolean checkpoint() {
         setVisibilityLevel(VisibilityLevel.SNAPSHOT_EXCLUDE_CURRENT);
-        return (++this.writeTimestamp % NUM_CHECKPOINTS == 0);
+        this.readTimestamp = this.writeTimestamp++;
+
+        return (this.writeTimestamp % NUM_CHECKPOINTS != 0);
     }
 
     @Override
     public String toString() {
-        return String.format("Tx-%s [%s] (ST=%d, CT=%d, Epoch=%d) WriteSet %s",
+        return String.format("Tx-%s [%s] (ST=%d, RT=%d, WT=%d, CT=%d, Epoch=%d) WriteSet %s",
                              Long.toHexString(getTransactionId()),
                              status,
                              startTimestamp,
+                             readTimestamp,
+                             writeTimestamp,
                              commitTimestamp,
                              epoch,
                              writeSet);

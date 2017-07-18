@@ -5,6 +5,7 @@ conflictMapSize: 100000000
 numConcurrentCTWriters: 2
 batchSizePerCTWriter: 500
 batchPersistTimeoutInMs: 100
+numOfCheckpoints: 1
 networkIfaceName: eth1
 
 commitTableStoreModule: !!org.apache.omid.committable.hbase.DefaultHBaseCommitTableStorageModule

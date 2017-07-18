@@ -30,7 +30,9 @@ batchPersistTimeoutInMs: 10
 # INCREMENTAL - [Default] regular counter
 # WORLD_TIME - world time based counter
 timestampType: INCREMENTAL
-
+# Number of checkpoints in each transaction
+# should be defined in the server side to use as the stride in timestamp allocation
+numOfCheckpoints: 1
 # Default module configuration (No TSO High Availability & in-memory storage for timestamp and commit tables)
 timestampStoreModule: !!org.apache.omid.tso.InMemoryTimestampStorageModule [ ]
 commitTableStoreModule: !!org.apache.omid.tso.InMemoryCommitTableStorageModule [ ]

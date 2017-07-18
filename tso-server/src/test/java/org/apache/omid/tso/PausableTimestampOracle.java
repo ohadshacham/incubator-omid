@@ -34,8 +34,9 @@ public class PausableTimestampOracle extends TimestampOracleImpl {
     @Inject
     public PausableTimestampOracle(MetricsRegistry metrics,
                                    TimestampStorage tsStorage,
-                                   Panicker panicker) throws IOException {
-        super(metrics, tsStorage, panicker);
+                                   Panicker panicker,
+                                   TSOServerConfig config) throws IOException {
+        super(metrics, tsStorage, panicker, config);
     }
 
     @Override

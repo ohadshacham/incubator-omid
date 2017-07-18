@@ -64,8 +64,11 @@ public class TestRequestProcessor {
         // Build the required scaffolding for the test
         MetricsRegistry metrics = new NullMetricsProvider();
 
+        TSOServerConfig config = new TSOServerConfig();
+        config.setConflictMapSize(CONFLICT_MAP_SIZE);
+
         TimestampOracleImpl timestampOracle =
-                new TimestampOracleImpl(metrics, new TimestampOracleImpl.InMemoryTimestampStorage(), new MockPanicker());
+                new TimestampOracleImpl(metrics, new TimestampOracleImpl.InMemoryTimestampStorage(), new MockPanicker(), config);
 
         stateManager = new TSOStateManagerImpl(timestampOracle);
 
@@ -73,9 +76,6 @@ public class TestRequestProcessor {
         SettableFuture<Void> f = SettableFuture.create();
         f.set(null);
         doReturn(f).when(persist).persistLowWatermark(any(Long.class));
-
-        TSOServerConfig config = new TSOServerConfig();
-        config.setConflictMapSize(CONFLICT_MAP_SIZE);
 
         requestProc = new RequestProcessorImpl(metrics, timestampOracle, persist, new MockPanicker(), config);
 

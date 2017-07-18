@@ -50,6 +50,7 @@ public class WorldClockOracleImpl implements TimestampOracle {
 
     private long lastTimestamp;
     private long maxTimestamp;
+    private int strideForCheckpoints;
 
     private TimestampStorage storage;
     private Panicker panicker;
@@ -84,10 +85,12 @@ public class WorldClockOracleImpl implements TimestampOracle {
     @Inject
     public WorldClockOracleImpl(MetricsRegistry metrics,
                                TimestampStorage tsStorage,
-                               Panicker panicker) throws IOException {
+                               Panicker panicker,
+                               TSOServerConfig config) throws IOException {
 
         this.storage = tsStorage;
         this.panicker = panicker;
+        this.strideForCheckpoints = (config.getNumOfCheckpoints() > 0) ? config.getNumOfCheckpoints() : 1;
 
         metrics.gauge(name("tso", "maxTimestamp"), new Gauge<Long>() {
             @Override
@@ -130,8 +133,10 @@ public class WorldClockOracleImpl implements TimestampOracle {
 
         long currentMsFirstTimestamp = System.currentTimeMillis() * MAX_TX_PER_MS;
 
+        lastTimestamp += strideForCheckpoints;
+
         // Return the next timestamp in case we are still in the same millisecond as the previous timestamp was. 
-        if (++lastTimestamp >= currentMsFirstTimestamp) {
+        if (lastTimestamp >= currentMsFirstTimestamp) {
             return lastTimestamp;
         }
 

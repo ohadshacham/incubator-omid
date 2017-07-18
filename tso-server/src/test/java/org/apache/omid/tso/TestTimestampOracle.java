@@ -51,6 +51,8 @@ public class TestTimestampOracle {
     private Panicker panicker;
     @Mock
     private TimestampStorage timestampStorage;
+    @Mock
+    TSOServerConfig config;
 
     // Component under test
     @InjectMocks

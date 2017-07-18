@@ -87,6 +87,8 @@ public class TimestampOracleImpl implements TimestampOracle {
 
     private long maxTimestamp;
 
+    private int strideForCheckpoints;
+
     private TimestampStorage storage;
     private Panicker panicker;
 
@@ -101,10 +103,12 @@ public class TimestampOracleImpl implements TimestampOracle {
     @Inject
     public TimestampOracleImpl(MetricsRegistry metrics,
                                TimestampStorage tsStorage,
-                               Panicker panicker) throws IOException {
+                               Panicker panicker,
+                               TSOServerConfig config) throws IOException {
 
         this.storage = tsStorage;
         this.panicker = panicker;
+        this.strideForCheckpoints = (config.getNumOfCheckpoints() > 0) ? config.getNumOfCheckpoints() : 1;
 
         metrics.gauge(name("tso", "maxTimestamp"), new Gauge<Long>() {
             @Override
@@ -134,9 +138,12 @@ public class TimestampOracleImpl implements TimestampOracle {
     @SuppressWarnings("StatementWithEmptyBody")
     @Override
     public long next() {
-        lastTimestamp++;
+        lastTimestamp += strideForCheckpoints;
 
-        if (lastTimestamp == nextAllocationThreshold) {
+        if (lastTimestamp >= nextAllocationThreshold) {
+            // set the nextAllocationThread to max value of long in order to
+            // make sure only one call to this function will execute a thread to extend the timestamp batch.
+            nextAllocationThreshold = Long.MAX_VALUE; 
             executor.execute(allocateTimestampsBatchTask);
         }
 

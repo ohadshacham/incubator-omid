@@ -44,6 +44,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.omid.committable.CommitTable.CommitTimestamp;
+import org.apache.omid.transaction.AbstractTransaction.VisibilityLevel;
 import org.apache.omid.transaction.HBaseTransactionManager.CommitTimestampLocatorImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -200,7 +201,7 @@ public class TTable implements Closeable {
                                             delete.getRow(),
                                             CellUtil.cloneFamily(cell),
                                             CellUtil.cloneQualifier(cell),
-                                            cell.getTimestamp()));
+                                            writeTimestamp));
                         break;
                     case DeleteFamily:
                         deleteG.addFamily(CellUtil.cloneFamily(cell));
@@ -218,7 +219,6 @@ public class TTable implements Closeable {
                                                 CellUtil.cloneFamily(cell),
                                                 CellUtil.cloneQualifier(cell),
                                                 writeTimestamp));
-                                                //cell.getTimestamp()));
                             break;
                         } else {
                             throw new UnsupportedOperationException(
@@ -241,8 +241,7 @@ public class TTable implements Closeable {
                         byte[] qualifier = entryQ.getKey();
                         deleteP.add(family, qualifier, CellUtils.DELETE_TOMBSTONE);
                         transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, qualifier,
-                                transaction.getStartTimestamp()));
-//                                writeTimestamp));
+                                writeTimestamp));
                     }
                 }
             }
@@ -268,6 +267,7 @@ public class TTable implements Closeable {
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
         final long writeTimestamp = transaction.getWriteTimestamp();
+
         // create put with correct ts
         final Put tsput = new Put(put.getRow(), writeTimestamp);
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
@@ -357,8 +357,11 @@ public class TTable implements Closeable {
                     if (!CellUtil.matchingValue(cell, CellUtils.DELETE_TOMBSTONE)) {
                         keyValuesInSnapshot.add(cell);
                     }
-                    snapshotValueFound = true;
-                    break;
+
+                    if (transaction.getVisibilityLevel() != VisibilityLevel.SNAPSHOT_ALL || !isCellInTransaction(cell, transaction, commitCache)) {
+                        snapshotValueFound = true;
+                        break;
+                    }
                 }
                 oldestCell = cell;
             }
@@ -381,7 +384,6 @@ public class TTable implements Closeable {
 
         Collections.sort(keyValuesInSnapshot, KeyValue.COMPARATOR);
 
-        assert (keyValuesInSnapshot.size() <= rawCells.size());
         return keyValuesInSnapshot;
     }
 

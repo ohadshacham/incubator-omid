@@ -74,7 +74,7 @@ public class TestPanicker {
 
         doThrow(new RuntimeException("Out of memory")).when(storage).updateMaxTimestamp(anyLong(), anyLong());
 
-        final TimestampOracleImpl tso = new TimestampOracleImpl(metrics, storage, panicker);
+        final TimestampOracleImpl tso = new TimestampOracleImpl(metrics, storage, panicker, new TSOServerConfig());
         tso.initialize();
         Thread allocThread = new Thread("AllocThread") {
             @Override
