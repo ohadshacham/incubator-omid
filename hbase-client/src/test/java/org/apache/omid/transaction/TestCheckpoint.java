@@ -25,6 +25,7 @@ import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.omid.transaction.AbstractTransaction.VisibilityLevel;
+import org.junit.Assert;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testng.ITestContext;
@@ -294,5 +295,26 @@ public class TestCheckpoint extends OmidTestBase {
                 "Unexpected value for SI read " + tx1 + ": " + Bytes.toString(r.getValue(famName1, colName1)));
         
         tt.close();
+    }
+
+    @Test(timeOut = 30_000)
+    public void testOutOfCheckpoints(ITestContext context) throws Exception {
+        TransactionManager tm = newTransactionManager(context);
+
+        Transaction tx1 = tm.begin();
+
+        HBaseTransaction hbaseTx1 = enforceHBaseTransactionAsParam(tx1);
+
+        for (int i=0; i < AbstractTransactionManager.NUM_OF_CHECKPOINTS ; ++i) {
+            hbaseTx1.checkpoint();
+        }
+
+        try {
+            hbaseTx1.checkpoint();
+            Assert.fail();
+        } catch (TransactionException e) {
+            // expected
+        }
+
     }
 }
