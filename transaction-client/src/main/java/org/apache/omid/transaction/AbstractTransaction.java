@@ -18,6 +18,7 @@
 package org.apache.omid.transaction;
 
 import com.google.common.base.Optional;
+
 import org.apache.omid.tso.client.CellId;
 
 import java.util.ArrayList;
@@ -41,19 +42,18 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
         SNAPSHOT, SNAPSHOT_ALL, SNAPSHOT_EXCLUDE_CURRENT
     }
 
-    public static final int NUM_CHECKPOINTS = 50;
-
     private transient Map<String, Object> metadata = new HashMap<>();
     private final AbstractTransactionManager transactionManager;
     private final long startTimestamp;
-    private long readTimestamp;
-    private long writeTimestamp;
+    protected long readTimestamp;
+    protected long writeTimestamp;
     private final long epoch;
     private long commitTimestamp;
     private boolean isRollbackOnly;
     private final Set<T> writeSet;
     private Status status = Status.RUNNING;
     private VisibilityLevel visibilityLevel;
+    private boolean lastCheckpoint = false;
 
     /**
      * Base constructor
@@ -80,6 +80,26 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
         this.writeSet = writeSet;
         this.transactionManager = transactionManager;
         visibilityLevel = VisibilityLevel.SNAPSHOT;
+    }
+
+    /**
+     * Creates a checkpoint and sets the visibility level to SNAPSHOT_EXCLUDE_CURRENT
+     * The number of checkpoints is bounded to NUM_CHECKPOINTS in order to make checkpoint a client side operation
+     * @return true if a checkpoint was created and false otherwise
+     * @throws TransactionException
+     */
+    void checkpoint() throws TransactionException {
+
+        if (lastCheckpoint == true) {
+            throw new TransactionException("Error: number of checkpoing cannot exceed " + AbstractTransactionManager.NUM_OF_CHECKPOINTS);
+        }
+
+        setVisibilityLevel(VisibilityLevel.SNAPSHOT_EXCLUDE_CURRENT);
+        this.readTimestamp = this.writeTimestamp++;
+
+        if (this.writeTimestamp % AbstractTransactionManager.NUM_OF_CHECKPOINTS == 0) {
+            lastCheckpoint = true;
+        }
     }
 
     /**
@@ -222,18 +242,6 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      */
     public void addWriteSetElement(T element) {
         writeSet.add(element);
-    }
-
-    /**
-     * Creates a checkpoint and sets the visibility level to SNAPSHOT_EXCLUDE_CURRENT
-     * The number of checkpoints is bounded to NUM_CHECKPOINTS in order to make checkpoint a client side operation
-     * @return true if a checkpoint was created and false otherwise
-     */
-    boolean checkpoint() {
-        setVisibilityLevel(VisibilityLevel.SNAPSHOT_EXCLUDE_CURRENT);
-        this.readTimestamp = this.writeTimestamp++;
-
-        return (this.writeTimestamp % NUM_CHECKPOINTS != 0);
     }
 
     @Override

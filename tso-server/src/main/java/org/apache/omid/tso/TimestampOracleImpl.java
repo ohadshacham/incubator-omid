@@ -19,14 +19,17 @@ package org.apache.omid.tso;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import org.apache.omid.metrics.Gauge;
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.timestamp.storage.TimestampStorage;
+import org.apache.omid.transaction.AbstractTransactionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
+
 import java.io.IOException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -87,8 +90,6 @@ public class TimestampOracleImpl implements TimestampOracle {
 
     private long maxTimestamp;
 
-    private int strideForCheckpoints;
-
     private TimestampStorage storage;
     private Panicker panicker;
 
@@ -103,12 +104,10 @@ public class TimestampOracleImpl implements TimestampOracle {
     @Inject
     public TimestampOracleImpl(MetricsRegistry metrics,
                                TimestampStorage tsStorage,
-                               Panicker panicker,
-                               TSOServerConfig config) throws IOException {
+                               Panicker panicker) throws IOException {
 
         this.storage = tsStorage;
         this.panicker = panicker;
-        this.strideForCheckpoints = (config.getNumOfCheckpoints() > 0) ? config.getNumOfCheckpoints() : 1;
 
         metrics.gauge(name("tso", "maxTimestamp"), new Gauge<Long>() {
             @Override
@@ -138,7 +137,7 @@ public class TimestampOracleImpl implements TimestampOracle {
     @SuppressWarnings("StatementWithEmptyBody")
     @Override
     public long next() {
-        lastTimestamp += strideForCheckpoints;
+        lastTimestamp += AbstractTransactionManager.NUM_OF_CHECKPOINTS;
 
         if (lastTimestamp >= nextAllocationThreshold) {
             // set the nextAllocationThread to max value of long in order to

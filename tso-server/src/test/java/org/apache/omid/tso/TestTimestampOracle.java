@@ -19,6 +19,7 @@ package org.apache.omid.tso;
 
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.timestamp.storage.TimestampStorage;
+import org.apache.omid.transaction.AbstractTransactionManager;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
@@ -72,7 +73,7 @@ public class TestTimestampOracle {
         long last = timestampOracle.next();
         for (int i = 0; i < (3 * TimestampOracleImpl.TIMESTAMP_BATCH); i++) {
             long current = timestampOracle.next();
-            assertEquals(current, last + 1, "Not monotonic growth");
+            assertEquals(current, last + AbstractTransactionManager.NUM_OF_CHECKPOINTS, "Not monotonic growth");
             last = current;
         }
         assertTrue(timestampOracle.getLast() == last);

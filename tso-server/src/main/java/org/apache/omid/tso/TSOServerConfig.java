@@ -89,8 +89,6 @@ public class TSOServerConfig extends SecureHBaseConfig {
 
     private String timestampType;
 
-    private int numOfCheckpoints;
-
     public int getPort() {
         return port;
     }
@@ -157,14 +155,6 @@ public class TSOServerConfig extends SecureHBaseConfig {
 
     public void setTimestampStoreModule(Module timestampStoreModule) {
         this.timestampStoreModule = timestampStoreModule;
-    }
-
-    public int getNumOfCheckpoints() {
-        return numOfCheckpoints;
-    }
-
-    public void setNumOfCheckpoints(int numOfCheckpoints) {
-        this.numOfCheckpoints = numOfCheckpoints;
     }
 
     public Module getCommitTableStoreModule() {

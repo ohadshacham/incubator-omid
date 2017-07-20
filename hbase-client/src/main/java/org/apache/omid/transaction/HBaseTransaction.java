@@ -19,6 +19,7 @@ package org.apache.omid.transaction;
 
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.HTableInterface;
+import org.apache.omid.transaction.AbstractTransaction.VisibilityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
