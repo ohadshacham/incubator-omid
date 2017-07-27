@@ -198,17 +198,17 @@ public class TestDeletion extends OmidTestBase {
         tt.delete(t2, d);
 
         Transaction tscan = tm.begin();
-//        ResultScanner rs = tt.getScanner(tscan, new Scan());
-//
-//        int rowsRead = countRows(rs);
-//        assertTrue(rowsRead == rowsWritten, "Expected " + rowsWritten + " rows but " + rowsRead + " found");
+        ResultScanner rs = tt.getScanner(tscan, new Scan());
+
+        int rowsRead = countRows(rs);
+        assertTrue(rowsRead == rowsWritten, "Expected " + rowsWritten + " rows but " + rowsRead + " found");
 
         tm.commit(t2);
 
         tscan = tm.begin();
-        ResultScanner rs = tt.getScanner(tscan, new Scan());
+        rs = tt.getScanner(tscan, new Scan());
 
-        int rowsRead = countRows(rs);
+        rowsRead = countRows(rs);
         assertTrue(rowsRead == (rowsWritten - 1), "Expected " + (rowsWritten - 1) + " rows but " + rowsRead + " found");
 
     }

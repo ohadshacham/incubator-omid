@@ -887,7 +887,8 @@ public class TTable implements Closeable {
 
             @Override
             public boolean apply(Cell cell) {
-                return cell != null && !CellUtils.isShadowCell(cell) && !CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER);
+                return cell != null && !CellUtils.isShadowCell(cell) && 
+                        !(CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER) && CellUtil.matchingValue(cell, HConstants.EMPTY_BYTE_ARRAY));
             }
 
         };
