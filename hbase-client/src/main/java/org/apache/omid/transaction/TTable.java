@@ -45,6 +45,7 @@ import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.omid.committable.CommitTable.CommitTimestamp;
 import org.apache.omid.transaction.HBaseTransactionManager.CommitTimestampLocatorImpl;
+import org.apache.omid.tso.client.OmidClientConfiguration.ConflictDetectionLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,6 +61,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.NavigableSet;
+import java.util.Set;
 
 /**
  * Provides transactional methods for accessing and modifying a given snapshot of data identified by an opaque {@link
@@ -166,6 +168,34 @@ public class TTable implements Closeable {
         return Result.create(filteredKeyValues);
     }
 
+    private void familyQualifierBasedDeletion(HBaseTransaction tx, Put deleteP, Get deleteG) throws IOException {
+        Result result = this.get(tx, deleteG);
+        if (!result.isEmpty()) {
+            for (Entry<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>> entryF : result.getMap()
+                    .entrySet()) {
+                byte[] family = entryF.getKey();
+                for (Entry<byte[], NavigableMap<Long, byte[]>> entryQ : entryF.getValue().entrySet()) {
+                    byte[] qualifier = entryQ.getKey();
+                    tx.addWriteSetElement(new HBaseCellId(table, deleteP.getRow(), family, qualifier,
+                            tx.getStartTimestamp()));
+                }
+                deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, tx.getStartTimestamp(),
+                        HConstants.EMPTY_BYTE_ARRAY);
+            }
+        }
+    }
+
+    private void  familyQualifierBasedDeletionWithOutRead(HBaseTransaction tx, Put deleteP, Get deleteG) {
+        Set<byte[]> fmap = deleteG.getFamilyMap().keySet();
+
+        for (byte[] family : fmap) {
+            deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, tx.getStartTimestamp(),
+                    HConstants.EMPTY_BYTE_ARRAY);
+        }
+        tx.addWriteSetElement(new HBaseCellId(table, deleteP.getRow(), null, null,
+                tx.getStartTimestamp()));
+    }
+
     /**
      * Transactional version of {@link HTableInterface#delete(Delete delete)}
      *
@@ -180,14 +210,15 @@ public class TTable implements Closeable {
         HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
 
         final long startTimestamp = transaction.getStartTimestamp();
-        boolean issueGet = false;
+        boolean deleteFamily = false;
 
         final Put deleteP = new Put(delete.getRow(), startTimestamp);
         final Get deleteG = new Get(delete.getRow());
         Map<byte[], List<Cell>> fmap = delete.getFamilyCellMap();
         if (fmap.isEmpty()) {
-            issueGet = true;
+            familyQualifierBasedDeletion(transaction, deleteP, deleteG);
         }
+
         for (List<Cell> cells : fmap.values()) {
             for (Cell cell : cells) {
                 CellUtils.validateCell(cell, startTimestamp);
@@ -206,7 +237,7 @@ public class TTable implements Closeable {
                         break;
                     case DeleteFamily:
                         deleteG.addFamily(CellUtil.cloneFamily(cell));
-                        issueGet = true;
+                        deleteFamily = true;
                         break;
                     case Delete:
                         if (cell.getTimestamp() == HConstants.LATEST_TIMESTAMP) {
@@ -230,24 +261,12 @@ public class TTable implements Closeable {
                 }
             }
         }
-        if (issueGet) {
-            // It's better to perform a transactional get to avoid deleting more
-            // than necessary
-            Result result = this.get(transaction, deleteG);
-            if (!result.isEmpty()) {
-                for (Entry<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>> entryF : result.getMap()
-                    .entrySet()) {
-                    byte[] family = entryF.getKey();
-                    for (Entry<byte[], NavigableMap<Long, byte[]>> entryQ : entryF.getValue().entrySet()) {
-                        byte[] qualifier = entryQ.getKey();
-                        transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, qualifier,
-                                                                       transaction.getStartTimestamp()));
-                    }
-                    deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, transaction.getStartTimestamp(),
-                            HConstants.EMPTY_BYTE_ARRAY);
-//                    transaction.addWriteSetElement(new HBaseCellId(table, delete.getRow(), family, CellUtils.FAMILY_DELETE_QUALIFIER,
-//                            transaction.getStartTimestamp()));
-                }
+
+        if (deleteFamily) {
+            if (enforceHBaseTransactionManagerAsParam(transaction.getTransactionManager()).getConflictDetectionLevel() == ConflictDetectionLevel.ROW) {
+                familyQualifierBasedDeletionWithOutRead(transaction, deleteP, deleteG);
+            } else {
+                familyQualifierBasedDeletion(transaction, deleteP, deleteG);
             }
         }
 
@@ -353,43 +372,21 @@ public class TTable implements Closeable {
             numberOfVersionsToFetch = versionsToRequest;
         }
 
-        System.out.println("OHAD I size: " + familyDeletionCache.size());
         Map<Long, Long> commitCache = buildCommitCache(rawCells);
         buildFamilyDeletionCache(rawCells, familyDeletionCache);
-        System.out.println("OHAD II size: " + familyDeletionCache.size());
-        System.out.flush();
+
         for (Collection<Cell> columnCells : groupCellsByColumnFilteringShadowCellsAndFamilyDeletion(rawCells)) {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
-                System.out.println("OHAD V: " + Bytes.toString(cell.getRow()));
-                System.out.flush();
-                if (familyDeletionCache.size() > 0) {
-                    String key = familyDeletionCache.keySet().iterator().next();
-//                    System.out.println("OHAD ***** key : " + key + " family: " + cell.getFamily() + " key in string: " + Bytes.toString(key) + " family cell in string: " + Bytes.toString(cell.getFamily()));
-                    System.out.println(" OHAD key: \"" + key + "\" cell row \"" + Bytes.toString(cell.getRow()) + "\"");
-                    System.out.flush();
-                }
-                
-                List<Cell> familyDeletionCells = familyDeletionCache.get(Bytes.toString(cell.getRow()));
+                List<Cell> familyDeletionCells = familyDeletionCache.get(Bytes.toString((cell.getRow())));
                 if (familyDeletionCells != null) {
-                    System.out.println("OHAD IV: " + familyDeletionCells.size());
-                    System.out.flush();
                     for(Cell familyDeletionCell : familyDeletionCells) {
-                        
                         String family = Bytes.toString(cell.getFamily());
                         String familyDeletion = Bytes.toString(familyDeletionCell.getFamily());
-
-                        System.out.println(" OHAD family: \"" + family + "\" and family deletion \"" + familyDeletion + "\"");
-                        System.out.flush();
-
                         if (family.equals(familyDeletion)) {
                             Optional<Long> familyDeletionCommitTimestamp = getCommitTimestamp(familyDeletionCell, transaction, commitCache);
-                            System.out.println("OHAD VI size: " + familyDeletionCache.size());
-                            System.out.flush();
                             if (familyDeletionCommitTimestamp.isPresent() && familyDeletionCommitTimestamp.get() >= cell.getTimestamp()) {
-                                System.out.println("OHAD III size: " + familyDeletionCache.size());
-                                System.out.flush();
                                 snapshotValueFound = true;
                                 break;
                             }
@@ -402,11 +399,7 @@ public class TTable implements Closeable {
                 }
 
                 if (isCellInSnapshot(cell, transaction, commitCache)) {
-                    System.out.println("OHAD FOUND");
-                    System.out.flush();
                     if (!CellUtil.matchingValue(cell, CellUtils.DELETE_TOMBSTONE)) {
-                        System.out.println("OHAD FOUND TOMBSTONE");
-                        System.out.flush();
                         keyValuesInSnapshot.add(cell);
                     }
                     snapshotValueFound = true;
@@ -875,6 +868,16 @@ public class TTable implements Closeable {
             throw new IllegalArgumentException(
                 String.format("The transaction object passed %s is not an instance of HBaseTransaction",
                               tx.getClass().getName()));
+        }
+    }
+
+    private HBaseTransactionManager enforceHBaseTransactionManagerAsParam(TransactionManager tm) {
+        if (tm instanceof HBaseTransactionManager) {
+            return (HBaseTransactionManager) tm;
+        } else {
+            throw new IllegalArgumentException(
+                String.format("The transaction manager object passed %s is not an instance of HBaseTransactionManager ",
+                              tm.getClass().getName()));
         }
     }
 
