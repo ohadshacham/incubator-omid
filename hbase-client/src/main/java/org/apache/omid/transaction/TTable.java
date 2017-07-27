@@ -362,27 +362,37 @@ public class TTable implements Closeable {
             boolean snapshotValueFound = false;
             Cell oldestCell = null;
             for (Cell cell : columnCells) {
-                System.out.println("OHAD V: " + Bytes.toString(cell.getFamily()));
+                System.out.println("OHAD V: " + Bytes.toString(cell.getRow()));
                 System.out.flush();
                 if (familyDeletionCache.size() > 0) {
                     String key = familyDeletionCache.keySet().iterator().next();
 //                    System.out.println("OHAD ***** key : " + key + " family: " + cell.getFamily() + " key in string: " + Bytes.toString(key) + " family cell in string: " + Bytes.toString(cell.getFamily()));
-                    System.out.println(" OHAD key: \"" + key + "\" cell family \"" + Bytes.toString(cell.getFamily()) + "\"");
+                    System.out.println(" OHAD key: \"" + key + "\" cell row \"" + Bytes.toString(cell.getRow()) + "\"");
                     System.out.flush();
                 }
-                List<Cell> familyDeletionCells = familyDeletionCache.get(Bytes.toString(cell.getFamily()));
+                
+                List<Cell> familyDeletionCells = familyDeletionCache.get(Bytes.toString(cell.getRow()));
                 if (familyDeletionCells != null) {
                     System.out.println("OHAD IV: " + familyDeletionCells.size());
                     System.out.flush();
                     for(Cell familyDeletionCell : familyDeletionCells) {
-                        Optional<Long> familyDeletionCommitTimestamp = getCommitTimestamp(familyDeletionCell, transaction, commitCache);
-                        System.out.println("OHAD VI size: " + familyDeletionCache.size());
+                        
+                        String family = Bytes.toString(cell.getFamily());
+                        String familyDeletion = Bytes.toString(familyDeletionCell.getFamily());
+
+                        System.out.println(" OHAD family: \"" + family + "\" and family deletion \"" + familyDeletion + "\"");
                         System.out.flush();
-                        if (familyDeletionCommitTimestamp.isPresent() && familyDeletionCommitTimestamp.get() > cell.getTimestamp()) {
-                            System.out.println("OHAD III size: " + familyDeletionCache.size());
+
+                        if (family.equals(familyDeletion)) {
+                            Optional<Long> familyDeletionCommitTimestamp = getCommitTimestamp(familyDeletionCell, transaction, commitCache);
+                            System.out.println("OHAD VI size: " + familyDeletionCache.size());
                             System.out.flush();
-                            snapshotValueFound = true;
-                            break;
+                            if (familyDeletionCommitTimestamp.isPresent() && familyDeletionCommitTimestamp.get() >= cell.getTimestamp()) {
+                                System.out.println("OHAD III size: " + familyDeletionCache.size());
+                                System.out.flush();
+                                snapshotValueFound = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -446,11 +456,11 @@ public class TTable implements Closeable {
             if (CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER) &&
                     CellUtil.matchingValue(cell, HConstants.EMPTY_BYTE_ARRAY)) {
 
-                String family = Bytes.toString(cell.getFamily());
-                List<Cell> cells = familyDeletionCache.get(family);
+                String row = Bytes.toString(cell.getRow());
+                List<Cell> cells = familyDeletionCache.get(row);
                 if (cells == null) {
                     cells = new ArrayList<>();
-                    familyDeletionCache.put(family, cells); //CellUtil.cloneFamily(cell), cells);
+                    familyDeletionCache.put(row, cells);
                 }
 
                 cells.add(cell);
@@ -481,7 +491,7 @@ public class TTable implements Closeable {
         Optional<Long> commitTimestamp = getCommitTimestamp(kv, transaction, commitCache);
 
 
-        return commitTimestamp.isPresent() && commitTimestamp.get() < transaction.getStartTimestamp();
+        return commitTimestamp.isPresent() && commitTimestamp.get() <= transaction.getStartTimestamp();
     }
 
     private Get createPendingGet(Cell cell, int versionCount) throws IOException {
