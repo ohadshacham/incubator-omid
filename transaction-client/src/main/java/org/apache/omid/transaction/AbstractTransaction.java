@@ -38,7 +38,7 @@ import java.util.Set;
  */
 public abstract class AbstractTransaction<T extends CellId> implements Transaction {
 
-    enum VisibilityLevel {
+    public enum VisibilityLevel {
         // Regular snapshot isolation. Returns the last key, either from the snapshot or from the current transaction
         // Sets the readTimestamp to be the writeTimestamp
         SNAPSHOT,
@@ -89,12 +89,48 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
     }
 
     /**
+     * Base constructor
+     *
+     * @param transactionId
+     *            transaction identifier to assign
+     * @param epoch
+     *            epoch of the TSOServer instance that created this transaction
+     *            Used in High Availability to guarantee data consistency
+     * @param writeSet
+     *            initial write set for the transaction.
+     *            Should be empty in most cases.
+     * @param transactionManager
+     *            transaction manager associated to this transaction.
+     *            Usually, should be the one that created the transaction
+     *            instance.
+     * @param readTimestamp
+     *            the snapshot to read from
+     * @param writeTimestamp
+     *            the timestamp to write to
+     *
+     */
+    public AbstractTransaction(long transactionId,
+                               long epoch,
+                               Set<T> writeSet,
+                               AbstractTransactionManager transactionManager,
+                               long readTimestamp,
+                               long writeTimestamp) {
+        this.startTimestamp = transactionId;
+        this.readTimestamp = readTimestamp;
+        this.writeTimestamp = writeTimestamp;
+        this.epoch = epoch;
+        this.writeSet = writeSet;
+        this.transactionManager = transactionManager;
+        visibilityLevel = VisibilityLevel.SNAPSHOT;
+    }
+
+    /**
      * Creates a checkpoint and sets the visibility level to SNAPSHOT_EXCLUDE_CURRENT
      * The number of checkpoints is bounded to NUM_CHECKPOINTS in order to make checkpoint a client side operation
      * @return true if a checkpoint was created and false otherwise
      * @throws TransactionException
      */
-    void checkpoint() throws TransactionException {
+    public void checkpoint() throws TransactionException {
 
         setVisibilityLevel(VisibilityLevel.SNAPSHOT_EXCLUDE_CURRENT);
         this.readTimestamp = this.writeTimestamp++;
@@ -169,6 +205,7 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      * Returns the read timestamp for this transaction.
      * @return read timestamp
      */
+    @Override
     public long getReadTimestamp() {
         return readTimestamp;
     }
@@ -177,6 +214,7 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
      * Returns the write timestamp for this transaction.
      * @return write timestamp
      */
+    @Override
     public long getWriteTimestamp() {
         return writeTimestamp;
     }

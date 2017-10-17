@@ -75,6 +75,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
     }
 
     @VisibleForTesting
+    public
     static class Builder {
 
         // Required parameters
@@ -89,12 +90,12 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             this.hbaseOmidClientConf = hbaseOmidClientConf;
         }
 
-        Builder tsoClient(TSOClient tsoClient) {
+        public Builder tsoClient(TSOClient tsoClient) {
             this.tsoClient = Optional.of(tsoClient);
             return this;
         }
 
-        Builder commitTableClient(CommitTable.Client client) {
+        public Builder commitTableClient(CommitTable.Client client) {
             this.commitTableClient = Optional.of(client);
             return this;
         }
@@ -104,7 +105,7 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
             return this;
         }
 
-        HBaseTransactionManager build() throws IOException, InterruptedException {
+        public HBaseTransactionManager build() throws IOException, InterruptedException {
 
             CommitTable.Client commitTableClient = this.commitTableClient.or(buildCommitTableClient()).get();
             PostCommitActions postCommitter = this.postCommitter.or(buildPostCommitter(commitTableClient)).get();
@@ -152,7 +153,8 @@ public class HBaseTransactionManager extends AbstractTransactionManager implemen
 
     }
 
-    @VisibleForTesting
+//    @VisibleForTesting
+    public
     static Builder builder(HBaseOmidClientConfiguration hbaseOmidClientConf) {
         return new Builder(hbaseOmidClientConf);
     }

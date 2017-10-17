@@ -21,15 +21,18 @@ import com.google.common.base.Preconditions;
 import com.google.inject.AbstractModule;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
+
 import org.apache.omid.committable.CommitTable;
 import org.apache.omid.committable.InMemoryCommitTable;
 import org.apache.omid.metrics.MetricsRegistry;
 import org.apache.omid.metrics.NullMetricsProvider;
 import org.apache.omid.timestamp.storage.TimestampStorage;
+import org.apache.omid.tso.TSOServerConfig.TIMESTAMP_TYPE;
 import org.apache.omid.tso.TimestampOracleImpl.InMemoryTimestampStorage;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
+
 import java.net.SocketException;
 import java.net.UnknownHostException;
 
@@ -51,7 +54,11 @@ public class TSOMockModule extends AbstractModule {
         bind(TSOStateManager.class).to(TSOStateManagerImpl.class).in(Singleton.class);
         bind(CommitTable.class).to(InMemoryCommitTable.class).in(Singleton.class);
         bind(TimestampStorage.class).to(InMemoryTimestampStorage.class).in(Singleton.class);
-        bind(TimestampOracle.class).to(PausableTimestampOracle.class).in(Singleton.class);
+        if (config.getTimestampTypeEnum() == TIMESTAMP_TYPE.WORLD_TIME) {
+            bind(TimestampOracle.class).to(WorldClockOracleImpl.class).in(Singleton.class);
+        } else {
+            bind(TimestampOracle.class).to(PausableTimestampOracle.class).in(Singleton.class);
+        }
         bind(Panicker.class).to(MockPanicker.class).in(Singleton.class);
 
         install(new BatchPoolModule(config));

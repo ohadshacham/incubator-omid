@@ -77,3 +77,7 @@ message HandshakeResponse {
     optional Capabilities serverCapabilities = 2;
 }
 
+message Transaction {
+  optional int64 transactionId = 1;
+  optional int64 epoch = 2;
+}
