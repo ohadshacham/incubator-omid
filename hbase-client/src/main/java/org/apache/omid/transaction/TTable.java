@@ -44,6 +44,7 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.io.TimeRange;
 import org.apache.hadoop.hbase.util.Bytes;
 import org.apache.omid.committable.CommitTable.CommitTimestamp;
+import org.apache.omid.proto.TSOProto;
 import org.apache.omid.transaction.AbstractTransaction.VisibilityLevel;
 import org.apache.omid.transaction.HBaseTransactionManager.CommitTimestampLocatorImpl;
 import org.apache.omid.tso.client.OmidClientConfiguration.ConflictDetectionLevel;
@@ -157,7 +158,15 @@ public class TTable implements Closeable {
             }
         }
         LOG.trace("Initial Get = {}", tsget);
+                
+        TSOProto.Transaction.Builder transactionBuilder = TSOProto.Transaction.newBuilder();
 
+        transactionBuilder.setTimestamp(transaction.getTransactionId());
+        transactionBuilder.setReadTimestamp(transaction.getReadTimestamp());
+        transactionBuilder.setVisibilityLevel(transaction.getVisibilityLevel().ordinal());
+                
+        tsget.setAttribute(CellUtils.TRANSACTION_ATTRIBUTE, transactionBuilder.build().toByteArray());
+        
         // Return the KVs that belong to the transaction snapshot, ask for more
         // versions if needed
         Result result = table.get(tsget);
@@ -455,7 +464,7 @@ public class TTable implements Closeable {
         return keyValuesInSnapshot;
     }
 
-    private Map<Long, Long> buildCommitCache(List<Cell> rawCells) {
+    public static Map<Long, Long> buildCommitCache(List<Cell> rawCells) {
 
         Map<Long, Long> commitCache = new HashMap<>();
 
@@ -468,7 +477,7 @@ public class TTable implements Closeable {
         return commitCache;
     }
 
-    private void buildFamilyDeletionCache(List<Cell> rawCells, Map<String, List<Cell>> familyDeletionCache) {
+    public static void buildFamilyDeletionCache(List<Cell> rawCells, Map<String, List<Cell>> familyDeletionCache) {
 
         for (Cell cell : rawCells) {
             if (CellUtil.matchingQualifier(cell, CellUtils.FAMILY_DELETE_QUALIFIER) &&
