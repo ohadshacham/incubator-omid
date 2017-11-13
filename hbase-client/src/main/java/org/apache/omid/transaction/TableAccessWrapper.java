@@ -15,40 +15,19 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.hadoop.hbase.regionserver;
-
-import org.apache.hadoop.hbase.HRegionInfo;
-import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.Put;
-import org.apache.hadoop.hbase.client.Result;
+package org.apache.omid.transaction;
 
 import java.io.IOException;
+import java.util.List;
 
-public class Region {
+import org.apache.hadoop.hbase.client.Result;
+import org.apache.hadoop.hbase.client.Put;
+import org.apache.hadoop.hbase.client.Get;
 
-    HRegion hRegion;
+public interface TableAccessWrapper {
 
-    public Region(HRegion hRegion) {
+    public Result[] get(List<Get> get) throws IOException;
+    public Result get(Get get) throws IOException;
+    public void   put(Put put) throws IOException;
 
-        this.hRegion = hRegion;
-
-    }
-
-    Result get(Get getOperation) throws IOException {
-
-        return hRegion.get(getOperation);
-
-    }
-
-    void put(Put putOperation) throws IOException {
-
-        hRegion.put(putOperation);
-
-    }
-
-    HRegionInfo getRegionInfo() {
-
-        return hRegion.getRegionInfo();
-
-    }
 }
