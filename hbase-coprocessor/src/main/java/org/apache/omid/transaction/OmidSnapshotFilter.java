@@ -60,7 +60,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
     @VisibleForTesting
     private CommitTable.Client commitTableClient;
 
-    private SnapshotFilter snapshotFilter;
+    private SnapshotFilterImpl snapshotFilter;
 
     final static String OMID_SNAPSHOT_FILTER_CF_FLAG = "OMID_SNAPSHOT_FILTER_ENABLED";
 
@@ -87,7 +87,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
             commitTableClient = initAndGetCommitTableClient();
         }
 
-        snapshotFilter = new SnapshotFilter(commitTableClient);
+        snapshotFilter = new SnapshotFilterImpl(commitTableClient);
         
         LOG.info("Snapshot filter started");
     }
@@ -101,6 +101,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
 
     public void setCommitTableClient(CommitTable.Client commitTableClient) {
         this.commitTableClient = commitTableClient;
+        this.snapshotFilter.setCommitTableClient(commitTableClient);
     }
 
     @Override
