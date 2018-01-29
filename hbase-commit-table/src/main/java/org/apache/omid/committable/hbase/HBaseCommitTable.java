@@ -221,7 +221,7 @@ public class HBaseCommitTable implements CommitTable {
 
         @Override
         public ListenableFuture<Void> completeTransaction(long startTimestamp) {
-            try {
+//            try {
                 synchronized (this) {
 
                     if (isClosed) {
@@ -230,22 +230,25 @@ public class HBaseCommitTable implements CommitTable {
                         return f;
                     }
 
-                    DeleteRequest req = new DeleteRequest(
-                            new Delete(startTimestampToKey(startTimestamp), startTimestamp));
-                    deleteQueue.put(req);
+                    DeleteRequest req = null; 
+//                    new DeleteRequest(
+//                            new Delete(startTimestampToKey(startTimestamp), startTimestamp));
+//                    deleteQueue.put(req);
+                    System.out.println("Not deleting timestamp " + startTimestamp + " from commit table due to index issues");
+                    System.out.flush();
                     return req;
                 }
-            } catch (IOException ioe) {
-                LOG.warn("Error generating timestamp for transaction completion", ioe);
-                SettableFuture<Void> f = SettableFuture.create();
-                f.setException(ioe);
-                return f;
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                SettableFuture<Void> f = SettableFuture.create();
-                f.setException(ie);
-                return f;
-            }
+//            } catch (IOException ioe) {
+//                LOG.warn("Error generating timestamp for transaction completion", ioe);
+//                SettableFuture<Void> f = SettableFuture.create();
+//                f.setException(ioe);
+//                return f;
+//            } catch (InterruptedException ie) {
+//                Thread.currentThread().interrupt();
+//                SettableFuture<Void> f = SettableFuture.create();
+//                f.setException(ie);
+//                return f;
+//            }
         }
 
         @Override

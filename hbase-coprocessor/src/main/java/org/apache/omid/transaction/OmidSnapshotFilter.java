@@ -29,6 +29,7 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.client.Get;
+import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -107,9 +108,9 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
     @Override
     public void preGetOp(ObserverContext<RegionCoprocessorEnvironment> c, Get get, List<Cell> result) throws IOException {
 
-        if (get.getAttribute(CellUtils.CLIENT_GET_ATTRIBUTE) == null) return;
+        if (((OperationWithAttributes)get).getAttribute(CellUtils.CLIENT_GET_ATTRIBUTE) == null) return;
 
-        get.setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, null);
+        ((OperationWithAttributes)get).setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, null);
         RegionAccessWrapper regionAccessWrapper = new RegionAccessWrapper(HBaseShims.getRegionCoprocessorRegion(c.getEnvironment()));
         Result res = regionAccessWrapper.get(get); // get parameters were set at the client side
 
@@ -117,7 +118,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
 
         List<Cell> filteredKeyValues = Collections.emptyList();
         if (!res.isEmpty()) {
-            TSOProto.Transaction transaction = TSOProto.Transaction.parseFrom(get.getAttribute(CellUtils.TRANSACTION_ATTRIBUTE));
+            TSOProto.Transaction transaction = TSOProto.Transaction.parseFrom(((OperationWithAttributes)get).getAttribute(CellUtils.TRANSACTION_ATTRIBUTE));
 
             long id = transaction.getTimestamp();
             long readTs = transaction.getReadTimestamp();
@@ -140,7 +141,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
     public RegionScanner postScannerOpen(ObserverContext<RegionCoprocessorEnvironment> e,
             Scan scan,
             RegionScanner s) throws IOException {
-        byte[] byteTransaction = scan.getAttribute(CellUtils.TRANSACTION_ATTRIBUTE);
+        byte[] byteTransaction = ((OperationWithAttributes)scan).getAttribute(CellUtils.TRANSACTION_ATTRIBUTE);
 
         if (byteTransaction == null) {
             return s;

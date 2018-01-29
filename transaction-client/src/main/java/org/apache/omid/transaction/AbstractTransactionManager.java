@@ -329,7 +329,7 @@ public abstract class AbstractTransactionManager implements TransactionManager {
     private void enforceTransactionIsInRunningState(Transaction transaction) {
 
         if (transaction.getStatus() != Status.RUNNING) {
-            throw new IllegalArgumentException("Transaction was already " + transaction.getStatus());
+            throw new IllegalArgumentException("Transaction " + transaction + " was already " + transaction.getStatus());
         }
 
     }

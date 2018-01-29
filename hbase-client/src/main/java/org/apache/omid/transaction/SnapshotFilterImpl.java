@@ -241,6 +241,9 @@ public class SnapshotFilterImpl implements SnapshotFilter {
                                         commitCache,
                                         tableAccessWrapper));
 
+        
+        System.out.println("Got commit timestamp: " + tentativeCommitTimestamp.getValue() + " for timestamp: " + cell.getTimestamp());
+        System.out.flush();
         // If transaction that added the cell was invalidated
         if (!tentativeCommitTimestamp.isValid()) {
             return Optional.absent();
@@ -387,10 +390,14 @@ public class SnapshotFilterImpl implements SnapshotFilter {
             for (Cell cell : columnCells) {
                 snapshotValueFound = checkFamilyDeletionCache(cell, transaction, familyDeletionCache, commitCache);
 
+                System.out.println("In omid scanner got cell row " + Bytes.toString(cell.getRow()) + " version " + cell.getTimestamp() + " transaction " + transaction.getReadTimestamp());
+                System.out.flush();
                 if (snapshotValueFound == true) {
                     if (transaction.getVisibilityLevel() == VisibilityLevel.SNAPSHOT_ALL) {
                         snapshotValueFound = false;
                     } else {
+                        System.out.println("In omid scanner TAKING row " + Bytes.toString(cell.getRow()) + " version " + cell.getTimestamp() + " transaction " + transaction.getReadTimestamp());
+                        System.out.flush();
                         break;
                     }
                 }
@@ -406,6 +413,8 @@ public class SnapshotFilterImpl implements SnapshotFilter {
                     // 2. if we found a result that was not written by the current transaction.
                     if (transaction.getVisibilityLevel() != VisibilityLevel.SNAPSHOT_ALL ||
                         !isCellInTransaction(cell, transaction, commitCache)) {
+                        System.out.println("In omid scanner TAKING row " + Bytes.toString(cell.getRow()) + " version " + cell.getTimestamp() + " transaction " + transaction.getReadTimestamp());
+                        System.out.flush();
                         snapshotValueFound = true;
                         break;
                     }

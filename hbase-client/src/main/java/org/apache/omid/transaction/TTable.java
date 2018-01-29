@@ -589,14 +589,55 @@ public class TTable implements Closeable {
     /**
      * Transactional version of {@link HTableInterface#put(List puts)}
      *
-     * @param transaction an instance of transaction to be used
+     * @param tx an instance of transaction to be used
      * @param puts        List of puts
      * @throws IOException if a remote or network exception occurs
+     * @throws InterruptedException 
      */
-    public void put(Transaction transaction, List<Put> puts) throws IOException {
+    public void put(Transaction tx, List<Put> puts) throws IOException, InterruptedException {
+
+        List<Put> putList = new ArrayList<Put>();
+
         for (Put put : puts) {
-            put(transaction, put);
+            throwExceptionIfOpSetsTimerange(put);
+
+            HBaseTransaction transaction = enforceHBaseTransactionAsParam(tx);
+
+            final long writeTimestamp = transaction.getWriteTimestamp();
+
+            // create put with correct ts
+            final Put tsput = new Put(put.getRow(), writeTimestamp);
+          
+            Map<String,byte[]> attributeMap = put.getAttributesMap();
+            
+            for (Map.Entry<String,byte[]> entry : attributeMap.entrySet()) {
+                tsput.setAttribute(entry.getKey(), entry.getValue());
+            }
+            
+            Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
+            for (List<Cell> kvl : kvs.values()) {
+                for (Cell c : kvl) {
+                    CellUtils.validateCell(c, writeTimestamp);
+                    // Reach into keyvalue to update timestamp.
+                    // It's not nice to reach into keyvalue internals,
+                    // but we want to avoid having to copy the whole thing
+                    KeyValue kv = KeyValueUtil.ensureKeyValue(c);
+                    Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), writeTimestamp);
+                    tsput.add(kv);
+
+                    transaction.addWriteSetElement(
+                        new HBaseCellId(table,
+                                        CellUtil.cloneRow(kv),
+                                        CellUtil.cloneFamily(kv),
+                                        CellUtil.cloneQualifier(kv),
+                                        kv.getTimestamp()));
+                }
+            }
+
+            putList.add(tsput);
         }
+
+         table.batch(putList);
     }
 
     /**
