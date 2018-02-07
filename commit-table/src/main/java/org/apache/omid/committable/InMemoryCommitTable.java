@@ -98,9 +98,10 @@ public class InMemoryCommitTable implements CommitTable {
         public ListenableFuture<Void> completeTransaction(long startTimestamp) {
             SettableFuture<Void> f = SettableFuture.create();
             System.out.println("Not removing " + startTimestamp + "in memory commit table");
-//            table.remove(startTimestamp);
+// for coprocessor side secondary index update            table.remove(startTimestamp);
+            table.remove(startTimestamp);
             f.set(null);
-            return f;
+            return f;	
         }
 
         @Override
