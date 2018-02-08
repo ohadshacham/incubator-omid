@@ -17,8 +17,22 @@
  */
 package org.apache.omid.transaction;
 
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Optional;
+
+import java.io.Closeable;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
+import java.util.Set;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
@@ -33,6 +47,7 @@ import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
 import org.apache.hadoop.hbase.client.HTableInterface;
 import org.apache.hadoop.hbase.client.Mutation;
+import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Put;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
@@ -43,6 +58,7 @@ import org.apache.omid.committable.CommitTable;
 import org.apache.omid.committable.CommitTable.CommitTimestamp;
 import org.apache.omid.proto.TSOProto;
 import org.apache.omid.tso.client.OmidClientConfiguration.ConflictDetectionLevel;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -168,6 +184,7 @@ public class TTable implements Closeable {
 
         final long readTimestamp = transaction.getReadTimestamp();
         final Get tsget = new Get(get.getRow()).setFilter(get.getFilter());
+        propagateAttributes(get, tsget);
         TimeRange timeRange = get.getTimeRange();
         long startTime = timeRange.getMin();
         long endTime = Math.min(timeRange.getMax(), readTimestamp + 1);
@@ -190,6 +207,14 @@ public class TTable implements Closeable {
         LOG.trace("Initial Get = {}", tsget);
 
         return snapshotFilter.get(this, tsget, transaction);
+    }
+
+    private void propagateAttributes(OperationWithAttributes from, OperationWithAttributes to) {
+        Map<String,byte[]> attributeMap = from.getAttributesMap();
+
+        for (Map.Entry<String,byte[]> entry : attributeMap.entrySet()) {
+            to.setAttribute(entry.getKey(), entry.getValue());
+        }
     }
 
     private void familyQualifierBasedDeletion(HBaseTransaction tx, Put deleteP, Get deleteG) throws IOException {
@@ -238,6 +263,8 @@ public class TTable implements Closeable {
 
         final Put deleteP = new Put(delete.getRow(), writeTimestamp);
         final Get deleteG = new Get(delete.getRow());
+        propagateAttributes(delete, deleteP);
+        propagateAttributes(delete, deleteG);
         Map<byte[], List<Cell>> fmap = delete.getFamilyCellMap();
         if (fmap.isEmpty()) {
             familyQualifierBasedDeletion(transaction, deleteP, deleteG);
@@ -299,6 +326,10 @@ public class TTable implements Closeable {
 
     }
 
+    public void markPutAsConflictFreeMutation(Put put) {
+        put.setAttribute(CellUtils.CONFLICT_FREE_MUTATION, Bytes.toBytes(true));
+    }
+
     /**
      * Transactional version of {@link HTableInterface#put(Put put)}
      *
@@ -307,6 +338,16 @@ public class TTable implements Closeable {
      * @throws IOException if a remote or network exception occurs.
      */
     public void put(Transaction tx, Put put) throws IOException {
+        put(tx, put, false);
+    }
+
+    /**
+     * @param put an instance of Put
+     * @param tx  an instance of transaction to be used
+     * @param autoCommit  denotes whether to automatically commit the put
+     * @throws IOException if a remote or network exception occurs.
+     */
+    public void put(Transaction tx, Put put, boolean autoCommit) throws IOException {
 
         throwExceptionIfOpSetsTimerange(put);
 
@@ -316,6 +357,7 @@ public class TTable implements Closeable {
 
         // create put with correct ts
         final Put tsput = new Put(put.getRow(), writeTimestamp);
+        propagateAttributes(put, tsput);
         Map<byte[], List<Cell>> kvs = put.getFamilyCellMap();
         for (List<Cell> kvl : kvs.values()) {
             for (Cell c : kvl) {
@@ -327,12 +369,25 @@ public class TTable implements Closeable {
                 Bytes.putLong(kv.getValueArray(), kv.getTimestampOffset(), writeTimestamp);
                 tsput.add(kv);
 
-                transaction.addWriteSetElement(
-                    new HBaseCellId(table,
-                                    CellUtil.cloneRow(kv),
-                                    CellUtil.cloneFamily(kv),
-                                    CellUtil.cloneQualifier(kv),
-                                    kv.getTimestamp()));
+                if (autoCommit) {
+                    tsput.add(CellUtil.cloneFamily(kv),
+                            CellUtils.addShadowCellSuffix(CellUtil.cloneQualifier(kv), 0, CellUtil.cloneQualifier(kv).length),
+                            kv.getTimestamp(),
+                            Bytes.toBytes(kv.getTimestamp()));
+                } else {
+                    byte[] conflictFree = put.getAttribute(CellUtils.CONFLICT_FREE_MUTATION);
+                    HBaseCellId cellId = new HBaseCellId(table,
+                            CellUtil.cloneRow(kv),
+                            CellUtil.cloneFamily(kv),
+                            CellUtil.cloneQualifier(kv),
+                            kv.getTimestamp());
+
+                    if (conflictFree != null && conflictFree[0]!=0) {
+                        transaction.addConflictFreeWriteSetElement(cellId);
+                    } else {
+                        transaction.addWriteSetElement(cellId);
+                    }
+                }
             }
         }
 
@@ -356,6 +411,7 @@ public class TTable implements Closeable {
         Scan tsscan = new Scan(scan);
         tsscan.setMaxVersions(1);
         tsscan.setTimeRange(0, transaction.getReadTimestamp() + 1);
+        propagateAttributes(scan, tsscan);
         Map<byte[], NavigableSet<byte[]>> kvs = scan.getFamilyMap();
         for (Map.Entry<byte[], NavigableSet<byte[]>> entry : kvs.entrySet()) {
             byte[] family = entry.getKey();
@@ -374,10 +430,9 @@ public class TTable implements Closeable {
         return snapshotFilter.getScanner(this, tsscan, transaction);
     }
 
-    
     List<Cell> filterCellsForSnapshot(List<Cell> rawCells, HBaseTransaction transaction,
-                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache) throws IOException {
-        return snapshotFilter.filterCellsForSnapshot(rawCells, transaction, versionsToRequest, familyDeletionCache);
+                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache, Map<String,byte[]> attributeMap) throws IOException {
+        return snapshotFilter.filterCellsForSnapshot(rawCells, transaction, versionsToRequest, familyDeletionCache, attributeMap);
     }
 
 
@@ -387,6 +442,7 @@ public class TTable implements Closeable {
         private ResultScanner innerScanner;
         private int maxVersions;
         Map<String, List<Cell>> familyDeletionCache;
+        private Map<String,byte[]> attributeMap;
 
         TransactionalClientScanner(HBaseTransaction state, Scan scan, int maxVersions)
             throws IOException {
@@ -394,6 +450,7 @@ public class TTable implements Closeable {
             this.innerScanner = table.getScanner(scan);
             this.maxVersions = maxVersions;
             this.familyDeletionCache = new HashMap<String, List<Cell>>();
+            this.attributeMap = scan.getAttributesMap();
         }
 
 
@@ -406,7 +463,7 @@ public class TTable implements Closeable {
                     return null;
                 }
                 if (!result.isEmpty()) {
-                    filteredResult = filterCellsForSnapshot(result.listCells(), state, maxVersions, familyDeletionCache);
+                    filteredResult = filterCellsForSnapshot(result.listCells(), state, maxVersions, familyDeletionCache, attributeMap);
                 }
             }
             return Result.create(filteredResult);

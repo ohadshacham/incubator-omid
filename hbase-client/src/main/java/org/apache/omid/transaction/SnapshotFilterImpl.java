@@ -241,7 +241,6 @@ public class SnapshotFilterImpl implements SnapshotFilter {
                                         commitCache,
                                         tableAccessWrapper));
 
-        
         System.out.println("Got commit timestamp: " + tentativeCommitTimestamp.getValue() + " for timestamp: " + cell.getTimestamp());
         System.out.flush();
         // If transaction that added the cell was invalidated
@@ -369,7 +368,7 @@ public class SnapshotFilterImpl implements SnapshotFilter {
      */
     @Override
     public List<Cell> filterCellsForSnapshot(List<Cell> rawCells, HBaseTransaction transaction,
-                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache) throws IOException {
+                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache, Map<String,byte[]> attributeMap) throws IOException {
 
         assert (rawCells != null && transaction != null && versionsToRequest >= 1);
 
@@ -424,6 +423,9 @@ public class SnapshotFilterImpl implements SnapshotFilter {
             if (!snapshotValueFound) {
                 assert (oldestCell != null);
                 Get pendingGet = createPendingGet(oldestCell, numberOfVersionsToFetch);
+                for (Map.Entry<String,byte[]> entry : attributeMap.entrySet()) {
+                    pendingGet.setAttribute(entry.getKey(), entry.getValue());
+                }
                 pendingGetsList.add(pendingGet);
             }
         }
@@ -433,7 +435,7 @@ public class SnapshotFilterImpl implements SnapshotFilter {
             for (Result pendingGetResult : pendingGetsResults) {
                 if (!pendingGetResult.isEmpty()) {
                     keyValuesInSnapshot.addAll(
-                        filterCellsForSnapshot(pendingGetResult.listCells(), transaction, numberOfVersionsToFetch, familyDeletionCache));
+                        filterCellsForSnapshot(pendingGetResult.listCells(), transaction, numberOfVersionsToFetch, familyDeletionCache, attributeMap));
                 }
             }
         }
@@ -449,7 +451,7 @@ public class SnapshotFilterImpl implements SnapshotFilter {
 
         List<Cell> filteredKeyValues = Collections.emptyList();
         if (!result.isEmpty()) {
-            filteredKeyValues = ttable.filterCellsForSnapshot(result.listCells(), transaction, get.getMaxVersions(), new HashMap<String, List<Cell>>());
+            filteredKeyValues = ttable.filterCellsForSnapshot(result.listCells(), transaction, get.getMaxVersions(), new HashMap<String, List<Cell>>(), get.getAttributesMap());
         }
 
         return Result.create(filteredKeyValues);

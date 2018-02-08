@@ -30,7 +30,6 @@ import org.apache.omid.committable.CommitTable.CommitTimestamp;
 
 import com.google.common.base.Optional;
 
-
 public interface SnapshotFilter {
     
     public Result get(TTable ttable, Get get, HBaseTransaction transaction) throws IOException;
@@ -38,7 +37,7 @@ public interface SnapshotFilter {
     public ResultScanner getScanner(TTable ttable, Scan scan, HBaseTransaction transaction) throws IOException;
 
     public List<Cell> filterCellsForSnapshot(List<Cell> rawCells, HBaseTransaction transaction,
-            int versionsToRequest, Map<String, List<Cell>> familyDeletionCache) throws IOException;
+            int versionsToRequest, Map<String, List<Cell>> familyDeletionCache, Map<String,byte[]> attributeMap) throws IOException;
 
     public boolean isCommitted(HBaseCellId hBaseCellId, long epoch) throws TransactionException;
 

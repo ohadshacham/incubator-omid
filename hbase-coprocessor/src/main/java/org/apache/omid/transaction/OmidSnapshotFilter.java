@@ -29,7 +29,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CoprocessorEnvironment;
 import org.apache.hadoop.hbase.client.Get;
-import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.coprocessor.BaseRegionObserver;
@@ -108,9 +107,9 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
     @Override
     public void preGetOp(ObserverContext<RegionCoprocessorEnvironment> c, Get get, List<Cell> result) throws IOException {
 
-        if (((OperationWithAttributes)get).getAttribute(CellUtils.CLIENT_GET_ATTRIBUTE) == null) return;
+        if (get.getAttribute(CellUtils.CLIENT_GET_ATTRIBUTE) == null) return;
 
-        ((OperationWithAttributes)get).setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, null);
+        get.setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, null);
         RegionAccessWrapper regionAccessWrapper = new RegionAccessWrapper(HBaseShims.getRegionCoprocessorRegion(c.getEnvironment()));
         Result res = regionAccessWrapper.get(get); // get parameters were set at the client side
 
@@ -118,15 +117,15 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
 
         List<Cell> filteredKeyValues = Collections.emptyList();
         if (!res.isEmpty()) {
-            TSOProto.Transaction transaction = TSOProto.Transaction.parseFrom(((OperationWithAttributes)get).getAttribute(CellUtils.TRANSACTION_ATTRIBUTE));
+            TSOProto.Transaction transaction = TSOProto.Transaction.parseFrom(get.getAttribute(CellUtils.TRANSACTION_ATTRIBUTE));
 
             long id = transaction.getTimestamp();
             long readTs = transaction.getReadTimestamp();
             long epoch = transaction.getEpoch();
             VisibilityLevel visibilityLevel = VisibilityLevel.fromInteger(transaction.getVisibilityLevel());
 
-            HBaseTransaction hbaseTransaction = new HBaseTransaction(id, readTs, visibilityLevel, epoch, new HashSet<HBaseCellId>(), null);
-            filteredKeyValues = snapshotFilter.filterCellsForSnapshot(res.listCells(), hbaseTransaction, get.getMaxVersions(), new HashMap<String, List<Cell>>());
+            HBaseTransaction hbaseTransaction = new HBaseTransaction(id, readTs, visibilityLevel, epoch, new HashSet<HBaseCellId>(), new HashSet<HBaseCellId>(), null);
+            filteredKeyValues = snapshotFilter.filterCellsForSnapshot(res.listCells(), hbaseTransaction, get.getMaxVersions(), new HashMap<String, List<Cell>>(), get.getAttributesMap());
         }
 
         for (Cell cell : filteredKeyValues) {
@@ -141,7 +140,7 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
     public RegionScanner postScannerOpen(ObserverContext<RegionCoprocessorEnvironment> e,
             Scan scan,
             RegionScanner s) throws IOException {
-        byte[] byteTransaction = ((OperationWithAttributes)scan).getAttribute(CellUtils.TRANSACTION_ATTRIBUTE);
+        byte[] byteTransaction = scan.getAttribute(CellUtils.TRANSACTION_ATTRIBUTE);
 
         if (byteTransaction == null) {
             return s;
@@ -154,13 +153,13 @@ public class OmidSnapshotFilter extends BaseRegionObserver {
         long epoch = transaction.getEpoch();
         VisibilityLevel visibilityLevel = VisibilityLevel.fromInteger(transaction.getVisibilityLevel());
 
-        HBaseTransaction hbaseTransaction = new HBaseTransaction(id, readTs, visibilityLevel, epoch, new HashSet<HBaseCellId>(), null);
+        HBaseTransaction hbaseTransaction = new HBaseTransaction(id, readTs, visibilityLevel, epoch, new HashSet<HBaseCellId>(), new HashSet<HBaseCellId>(), null);
 
         RegionAccessWrapper regionAccessWrapper = new RegionAccessWrapper(HBaseShims.getRegionCoprocessorRegion(e.getEnvironment()));
 
         snapshotFilter.setTableAccessWrapper(regionAccessWrapper);
 
-        return new OmidRegionScanner(snapshotFilter, s, hbaseTransaction, 1);
+        return new OmidRegionScanner(snapshotFilter, s, hbaseTransaction, 1, scan.getAttributesMap());
     }
 
     private CommitTable.Client initAndGetCommitTableClient() throws IOException {

@@ -24,7 +24,6 @@ import java.util.Map;
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTableInterface;
-import org.apache.hadoop.hbase.client.OperationWithAttributes;
 import org.apache.hadoop.hbase.client.Result;
 import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
@@ -51,8 +50,8 @@ public class AttributeSetSnapshotFilter implements SnapshotFilter {
 
     @Override
     public Result get(TTable ttable, Get get, HBaseTransaction transaction) throws IOException {
-        ((OperationWithAttributes)get).setAttribute(CellUtils.TRANSACTION_ATTRIBUTE, getBuilder(transaction).build().toByteArray());
-        ((OperationWithAttributes)get).setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, Bytes.toBytes(true));
+        get.setAttribute(CellUtils.TRANSACTION_ATTRIBUTE, getBuilder(transaction).build().toByteArray());
+        get.setAttribute(CellUtils.CLIENT_GET_ATTRIBUTE, Bytes.toBytes(true));
 
         return table.get(get);
     }
@@ -61,15 +60,16 @@ public class AttributeSetSnapshotFilter implements SnapshotFilter {
     public ResultScanner getScanner(TTable ttable, Scan scan, HBaseTransaction transaction) throws IOException {
         System.out.println("Before set attribute");
         System.out.flush();
-        ((OperationWithAttributes)scan).setAttribute(CellUtils.TRANSACTION_ATTRIBUTE, getBuilder(transaction).build().toByteArray());
+        scan.setAttribute(CellUtils.TRANSACTION_ATTRIBUTE, getBuilder(transaction).build().toByteArray());
         System.out.println("After set attribute");
         System.out.flush();
+
         return table.getScanner(scan);
     }
 
     @Override
     public List<Cell> filterCellsForSnapshot(List<Cell> rawCells, HBaseTransaction transaction,
-                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache) throws IOException {
+                                      int versionsToRequest, Map<String, List<Cell>> familyDeletionCache, Map<String,byte[]> attributeMap) throws IOException {
         throw new UnsupportedOperationException();
     }
 
