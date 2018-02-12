@@ -160,7 +160,7 @@ public abstract class AbstractTransaction<T extends CellId> implements Transacti
         this.writeSet = writeSet;
         this.conflictFreeWriteSet = conflictFreeWriteSet;
         this.transactionManager = transactionManager;
-        this.visibilityLevel = visibilityLevel;
+        this.visibilityLevel = VisibilityLevel.SNAPSHOT;
     }
 
     /**
