@@ -230,6 +230,8 @@ public class TTable implements Closeable {
                 }
                 deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, tx.getWriteTimestamp(),
                         HConstants.EMPTY_BYTE_ARRAY);
+                tx.addWriteSetElement(new HBaseCellId(table, deleteP.getRow(), family, CellUtils.FAMILY_DELETE_QUALIFIER,
+                        tx.getWriteTimestamp()));
             }
         }
     }
@@ -240,9 +242,9 @@ public class TTable implements Closeable {
         for (byte[] family : fset) {
             deleteP.add(family, CellUtils.FAMILY_DELETE_QUALIFIER, tx.getWriteTimestamp(),
                     HConstants.EMPTY_BYTE_ARRAY);
+            tx.addWriteSetElement(new HBaseCellId(table, deleteP.getRow(), family, CellUtils.FAMILY_DELETE_QUALIFIER,
+                    tx.getWriteTimestamp()));
         }
-        tx.addWriteSetElement(new HBaseCellId(table, deleteP.getRow(), null, null,
-                tx.getWriteTimestamp()));
     }
 
     /**
