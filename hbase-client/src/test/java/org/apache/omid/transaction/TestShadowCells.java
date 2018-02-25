@@ -20,10 +20,10 @@ package org.apache.omid.transaction;
 import com.google.common.base.Charsets;
 import com.google.common.base.Optional;
 import com.google.common.util.concurrent.ListenableFuture;
+
 import org.apache.omid.committable.CommitTable;
-
+import org.apache.omid.committable.CommitTable.CommitTimestamp;
 import org.apache.omid.metrics.NullMetricsProvider;
-
 import org.apache.hadoop.hbase.Cell;
 import org.apache.hadoop.hbase.CellUtil;
 import org.apache.hadoop.hbase.KeyValue;
@@ -45,6 +45,7 @@ import org.testng.ITestContext;
 import org.testng.annotations.Test;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -357,6 +358,197 @@ public class TestShadowCells extends OmidTestBase {
                     }
 
                     Transaction t = tm.begin();
+                    Get get = new Get(row);
+                    get.addColumn(family, qualifier);
+
+                    Result getResult = table.get(t, get);
+                    Cell cell = getResult.getColumnLatestCell(family, qualifier);
+                    if (!Arrays.equals(data1, CellUtil.cloneValue(cell))
+                            || !hasShadowCell(row,
+                            family,
+                            qualifier,
+                            cell.getTimestamp(),
+                            new TTableCellGetterAdapter(table))) {
+                        readFailed.set(true);
+                    } else {
+                        LOG.info("Read succeeded");
+                    }
+                } catch (Throwable e) {
+                    readFailed.set(true);
+                    LOG.error("Error whilst reading", e);
+                }
+            }
+        };
+        readThread.start();
+
+        // Write data
+        Put put = new Put(row);
+        put.add(family, qualifier, data1);
+        table.put(t1, put);
+        tm.commit(t1);
+
+        readThread.join();
+
+        assertFalse(readFailed.get(), "Read should have succeeded");
+
+    }
+
+    @Test(timeOut = 60_000)
+    public void testRaceConditionBetweenReaderAndWriterBeforeReadingCommitTableThreads(final ITestContext context) throws Exception {
+        final CountDownLatch readAfterCommit = new CountDownLatch(1);
+        final CountDownLatch postCommitBegin = new CountDownLatch(1);
+        final CountDownLatch postCommitEnd = new CountDownLatch(1);
+
+        final AtomicBoolean readFailed = new AtomicBoolean(false);
+        PostCommitActions syncPostCommitter =
+                spy(new HBaseSyncPostCommitter(new NullMetricsProvider(), getCommitTable(context).getClient()));
+        AbstractTransactionManager tm = (AbstractTransactionManager) newTransactionManager(context, syncPostCommitter);
+
+        doAnswer(new Answer<ListenableFuture<Void>>() {
+            @Override
+            public ListenableFuture<Void> answer(InvocationOnMock invocation) throws Throwable {
+                LOG.info("Releasing readAfterCommit barrier");
+                readAfterCommit.countDown();
+                LOG.info("Waiting postCommitBegin barrier");
+                postCommitBegin.await();
+                ListenableFuture<Void> result = (ListenableFuture<Void>) invocation.callRealMethod();
+                LOG.info("Releasing postCommitEnd barrier");
+                postCommitEnd.countDown();
+                return result;
+            }
+        }).when(syncPostCommitter).updateShadowCells(any(HBaseTransaction.class));
+
+        // Start transaction on write thread
+        TTable table = new TTable(hbaseConf, TEST_TABLE);
+
+        final HBaseTransaction t1 = (HBaseTransaction) tm.begin();
+
+        // Start read thread
+        Thread readThread = new Thread("Read Thread") {
+            @Override
+            public void run() {
+                LOG.info("Waiting readAfterCommit barrier");
+                try {
+                    readAfterCommit.await();
+                    final TTable table = spy(new TTable(hbaseConf, TEST_TABLE));
+                    AbstractTransactionManager tm = spy((AbstractTransactionManager) newTransactionManager(context));
+                    doAnswer(new Answer<CommitTimestamp>() {
+                        @SuppressWarnings("unchecked")
+                        @Override
+                        public CommitTimestamp answer(InvocationOnMock invocation) throws Throwable {
+                            LOG.info("Release postCommitBegin barrier");
+                            postCommitBegin.countDown();
+                            LOG.info("Waiting postCommitEnd barrier");
+                            postCommitEnd.await();
+                            return (CommitTimestamp) invocation.callRealMethod();
+                        }
+                    }).when(tm).locateCellCommitTimestamp(anyLong(), anyLong(), any(CommitTimestampLocator.class)); 
+                    
+                    if (hasShadowCell(row,
+                            family,
+                            qualifier,
+                            t1.getStartTimestamp(),
+                            new TTableCellGetterAdapter(table))) {
+                        readFailed.set(true);
+                    }
+
+                    Transaction t = tm.begin();
+                    Get get = new Get(row);
+                    get.addColumn(family, qualifier);
+
+                    Result getResult = table.get(t, get);
+                    Cell cell = getResult.getColumnLatestCell(family, qualifier);
+                    if (!Arrays.equals(data1, CellUtil.cloneValue(cell))
+                            || !hasShadowCell(row,
+                            family,
+                            qualifier,
+                            cell.getTimestamp(),
+                            new TTableCellGetterAdapter(table))) {
+                        readFailed.set(true);
+                    } else {
+                        LOG.info("Read succeeded");
+                    }
+                } catch (Throwable e) {
+                    readFailed.set(true);
+                    LOG.error("Error whilst reading", e);
+                }
+            }
+        };
+        readThread.start();
+
+        // Write data
+        Put put = new Put(row);
+        put.add(family, qualifier, data1);
+        table.put(t1, put);
+        tm.commit(t1);
+
+        readThread.join();
+
+        assertFalse(readFailed.get(), "Read should have succeeded");
+
+    }
+
+    @Test(timeOut = 60_000)
+    public void testRaceConditionBetweenReaderAndWriterBeforeReadingCommitTableThreadsFromDifferentEpochs(final ITestContext context) throws Exception {
+        final CountDownLatch readAfterCommit = new CountDownLatch(1);
+        final CountDownLatch postCommitBegin = new CountDownLatch(1);
+        final CountDownLatch postCommitEnd = new CountDownLatch(1);
+
+        final AtomicBoolean readFailed = new AtomicBoolean(false);
+        PostCommitActions syncPostCommitter =
+                spy(new HBaseSyncPostCommitter(new NullMetricsProvider(), getCommitTable(context).getClient()));
+        AbstractTransactionManager tm = (AbstractTransactionManager) newTransactionManager(context, syncPostCommitter);
+
+        doAnswer(new Answer<ListenableFuture<Void>>() {
+            @Override
+            public ListenableFuture<Void> answer(InvocationOnMock invocation) throws Throwable {
+                LOG.info("Releasing readAfterCommit barrier");
+                readAfterCommit.countDown();
+                LOG.info("Waiting postCommitBegin barrier");
+                postCommitBegin.await();
+                ListenableFuture<Void> result = (ListenableFuture<Void>) invocation.callRealMethod();
+                LOG.info("Releasing postCommitEnd barrier");
+                postCommitEnd.countDown();
+                return result;
+            }
+        }).when(syncPostCommitter).updateShadowCells(any(HBaseTransaction.class));
+
+        // Start transaction on write thread
+        TTable table = new TTable(hbaseConf, TEST_TABLE);
+
+        final HBaseTransaction t1 = (HBaseTransaction) tm.begin();
+
+        // Start read thread
+        Thread readThread = new Thread("Read Thread") {
+            @Override
+            public void run() {
+                LOG.info("Waiting readAfterCommit barrier");
+                try {
+                    readAfterCommit.await();
+                    final TTable table = spy(new TTable(hbaseConf, TEST_TABLE));
+                    AbstractTransactionManager tm = spy((AbstractTransactionManager) newTransactionManager(context));
+                    doAnswer(new Answer<CommitTimestamp>() {
+                        @SuppressWarnings("unchecked")
+                        @Override
+                        public CommitTimestamp answer(InvocationOnMock invocation) throws Throwable {
+                            LOG.info("Release postCommitBegin barrier");
+                            postCommitBegin.countDown();
+                            LOG.info("Waiting postCommitEnd barrier");
+                            postCommitEnd.await();
+                            return (CommitTimestamp) invocation.callRealMethod();
+                        }
+                    }).when(tm).invalidateAndCheck(anyLong(), anyLong(), any(CommitTimestampLocator.class));
+                    
+                    if (hasShadowCell(row,
+                            family,
+                            qualifier,
+                            t1.getStartTimestamp(),
+                            new TTableCellGetterAdapter(table))) {
+                        readFailed.set(true);
+                    }
+
+                    Transaction t = new HBaseTransaction(t1.getEpoch() + 11, t1.getEpoch() + 10, new HashSet<HBaseCellId>(), tm);
+
                     Get get = new Get(row);
                     get.addColumn(family, qualifier);
 
